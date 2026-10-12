@@ -6,7 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from aggregator import create_app, db
 from aggregator.article_signals import bias_bucket_for_score, is_independent_source
 from aggregator.models import AppSetting, PipelineSchedule, ScheduledFetch
-from news_fetcher.fetch_and_store_articles import fetch_and_store_articles, process_current_edition, review_ambiguous_grouping_matches, sync_allsides_ratings, publish_edition, retry_unrated_outlets, clear_stale_single_article_headlines
+from news_fetcher.fetch_and_store_articles import fetch_and_store_articles, process_current_edition, review_ambiguous_grouping_matches, sync_allsides_ratings, publish_edition, retry_unrated_outlets, clear_stale_single_article_headlines, backfill_missing_summaries, auto_summaries_enabled
 from news_fetcher.headline_generator import generate_headlines_for_stale_stories
 from news_fetcher.rss_fetcher import (
     fetch_and_store_rss,
@@ -1074,6 +1074,20 @@ def run_all_fetches(run_full_pipeline=True):
             run_metrics["steps"]["publish_edition"] = {"status": "skipped", "reason": "fetch_only_run"}
             run_metrics["steps"]["process_current_edition"] = {"status": "skipped", "reason": "fetch_only_run"}
             run_metrics["steps"]["static_export"] = {"status": "skipped", "reason": "fetch_only_run"}
+
+        # Optional Admin Tools toggle: fill missing summaries for EVERY story
+        # after any fetch (fetch-only runs normally generate none).
+        if auto_summaries_enabled():
+            logging.info("--- Backfilling missing story summaries ---")
+            try:
+                run_metrics["steps"]["auto_summaries"] = backfill_missing_summaries()
+            except Exception as e:
+                db.session.rollback()
+                logging.error(f"Error backfilling summaries: {e}")
+                run_metrics["status"] = "partial_error"
+                run_metrics["steps"]["auto_summaries"] = {"status": "error", "reason": str(e)}
+        else:
+            run_metrics["steps"]["auto_summaries"] = {"status": "skipped", "reason": "toggle_off"}
 
         run_metrics["steps"]["search_index"] = _update_search_index(
             datetime.fromisoformat(run_metrics["started_at"])

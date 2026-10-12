@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 def tools_page():
     from news_fetcher.fetch_and_store_articles import (
         AUTO_ARTICLE_DEEP_ANALYSIS_SETTING_KEY,
+        AUTO_SUMMARIES_SETTING_KEY,
     )
     auto_deep = bool(_load_json_setting(AUTO_ARTICLE_DEEP_ANALYSIS_SETTING_KEY))
+    auto_summaries = bool(_load_json_setting(AUTO_SUMMARIES_SETTING_KEY))
 
     running_ops = _running_operations()
     fetch_ops = [op for op in running_ops if op["kind"] == "fetch"]
@@ -29,6 +31,7 @@ def tools_page():
     return render_template(
         "admin_tools.html",
         auto_article_deep_analysis_enabled=auto_deep,
+        auto_summaries_enabled=auto_summaries,
         containers=_list_containers(),
         container_service_order=CONTAINER_SERVICE_NAMES,
         pipeline_schedule_restart_needed=pipeline_schedule_restart_needed(),
@@ -49,6 +52,18 @@ def toggle_auto_article_deep_analysis():
     enabled = request.form.get("enabled") == "true"
     _save_json_setting(AUTO_ARTICLE_DEEP_ANALYSIS_SETTING_KEY, enabled)
     logger.info(f"[Settings] auto_article_deep_analysis_enabled set to {enabled}")
+    return redirect(url_for("admin.tools_page"))
+
+
+@admin.route("/toggle-auto-summaries", methods=["POST"])
+@role_required(ROLE_ADMIN)
+def toggle_auto_summaries():
+    from news_fetcher.fetch_and_store_articles import (
+        AUTO_SUMMARIES_SETTING_KEY,
+    )
+    enabled = request.form.get("enabled") == "true"
+    _save_json_setting(AUTO_SUMMARIES_SETTING_KEY, enabled)
+    logger.info(f"[Settings] auto_summaries_enabled set to {enabled}")
     return redirect(url_for("admin.tools_page"))
 
 

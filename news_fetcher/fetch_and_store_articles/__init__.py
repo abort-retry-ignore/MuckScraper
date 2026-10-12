@@ -82,6 +82,9 @@ from .maintenance import (  # noqa: F401
     force_resummarize_all,
     reclassify_all_articles,
     ollama_catchup,
+    backfill_missing_summaries,
+    auto_summaries_enabled,
+    AUTO_SUMMARIES_SETTING_KEY,
 )
 
 from . import ingestion, providers, outlets, grouping_review, edition_publish, edition_content, maintenance  # noqa: E402,F401

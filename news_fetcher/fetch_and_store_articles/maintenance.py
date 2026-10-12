@@ -7,6 +7,11 @@ running any of these -- several are global, not scoped.
 """
 
 import logging
+import os
+from datetime import datetime
+
+from sqlalchemy import or_
+
 from aggregator import db
 from aggregator.models import Article, Story
 from news_fetcher import llm_client as _llm
@@ -125,6 +130,119 @@ def audit_existing_scrapes(batch_size=200):
 
     db.session.commit()
     logger.info(f"[Audit] Complete. Cleared {cleared} articles, auto-blocked {len(auto_blocked)} domains.")
+
+
+AUTO_SUMMARIES_SETTING_KEY = "auto_summaries_enabled"
+
+
+def auto_summaries_enabled():
+    """The Admin Tools toggle: fill missing story summaries after EVERY fetch.
+
+    Off by default -- without a cap this would make every fetch generate
+    summaries for the whole back catalog, which is expensive on a small box --
+    so it should not silently turn on for everyone. Stored via the same JSON
+    AppSetting mechanism the deep-analysis toggle uses.
+    """
+    import json
+
+    from aggregator.models import AppSetting
+
+    setting = AppSetting.query.filter_by(key=AUTO_SUMMARIES_SETTING_KEY).first()
+    if not setting:
+        return False
+    try:
+        return bool(json.loads(setting.value))
+    except (ValueError, TypeError):
+        return False
+
+
+def backfill_missing_summaries(max_stories=None, batch_size=20):
+    """Fill missing summaries for stories outside the edition workflow.
+
+    process_current_edition() only fills summaries for edition stories (plus a
+    short backfill window). Stories that never make an edition -- single-source
+    items, older ones, anything fetched between editions -- stayed blank until
+    someone ran force_resummarize_all. This pass covers whatever still has no
+    summary, newest first, capped per run so a large backlog burns down a
+    bounded slice per fetch: story summaries for multi-article stories, the
+    article's own summary for single-article ones, then per-article summaries
+    for any article with text that lacks one. Deep reports stay edition-only.
+    """
+    if not check_ollama_status(_llm.TIER_QUALITY):
+        logger.info("Quality-tier LLM offline, skipping summary backfill.")
+        return {"status": "skipped", "reason": "llm_offline"}
+
+    if max_stories is None:
+        max_stories = int(os.environ.get("AUTO_SUMMARY_MAX_STORIES", "80"))
+    max_articles = int(os.environ.get("AUTO_SUMMARY_MAX_ARTICLES", "160"))
+
+    metrics = {
+        "status": "ok",
+        "stories_backfilled": 0,
+        "stories_skipped_no_articles": 0,
+        "article_summaries": 0,
+        "remaining_without_summary": 0,
+    }
+
+    stories = (
+        Story.query
+        .filter(or_(Story.summary.is_(None), Story.summary == ""))
+        .order_by(Story.created_at.desc())
+        .limit(max_stories)
+        .all()
+    )
+    logger.info(f"=== Summary backfill: {len(stories)} story(ies) without summaries ===")
+    for i, story in enumerate(stories):
+        if not story.articles:
+            metrics["stories_skipped_no_articles"] += 1
+            continue
+
+        summary = None
+        if len(story.articles) >= 2:
+            summary = summarize_story(story)
+        else:
+            art = story.articles[0]
+            summary = art.summary or summarize_article(art)
+            if summary and not art.summary:
+                art.summary = summary
+        if summary:
+            story.summary = summary
+            story.summary_generated_at = datetime.utcnow()
+            metrics["stories_backfilled"] += 1
+
+        if (i + 1) % batch_size == 0:
+            db.session.commit()
+            logger.info(f"  [Backfill] Progress: {i + 1}/{len(stories)} stories")
+
+    # Per-article summaries: any article with scraped text and none yet.
+    articles = (
+        Article.query
+        .filter(Article.content != None, Article.content != "", Article.summary.is_(None))  # noqa: E711
+        .order_by(Article.date.desc())
+        .limit(max_articles)
+        .all()
+    )
+    if articles:
+        logger.info(f"  [Backfill] {len(articles)} article(s) missing their own summary")
+    for i, article in enumerate(articles):
+        summary = summarize_article(article)
+        if summary:
+            article.summary = summary
+            metrics["article_summaries"] += 1
+        if (i + 1) % batch_size == 0:
+            db.session.commit()
+            logger.info(f"  [Backfill] Progress: {i + 1}/{len(articles)} articles")
+
+    db.session.commit()
+    metrics["remaining_without_summary"] = Story.query.filter(
+        or_(Story.summary.is_(None), Story.summary == "")
+    ).count()
+    logger.info(
+        "=== Summary backfill done: {0} stories, {1} article summaries, {2} left without ===".format(
+            metrics["stories_backfilled"], metrics["article_summaries"], metrics["remaining_without_summary"],
+        )
+    )
+    return metrics
 
 
 def force_resummarize_all(batch_size=20):
