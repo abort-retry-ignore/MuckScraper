@@ -2,6 +2,7 @@
 
 import feedparser
 import logging
+import os
 from collections import Counter
 from datetime import datetime
 from datetime import timedelta
@@ -18,7 +19,15 @@ LEFT_ENRICHMENT_TOPIC = "Targeted Left RSS Enrichment"
 def _active_feed_urls(bucket):
     """Enabled RssFeed URLs for a bucket (general / right_enrichment / left_enrichment)."""
     from aggregator.models import RssFeed
-    return [f.url for f in RssFeed.query.filter_by(bucket=bucket, enabled=True).all()]
+    urls = [f.url for f in RssFeed.query.filter_by(bucket=bucket, enabled=True).order_by(RssFeed.id.asc()).all()]
+    # Science/tech wires sit after a long NZ block. Fetch them first so a slow
+    # run still surfaces Reuters, CNN and BBC before it finishes local news.
+    try:
+        from local.feed_topics import topic_for_feed
+        urls.sort(key=lambda url: 0 if topic_for_feed(url) == "Sci/Tech" else 1)
+    except Exception:
+        pass
+    return urls
 
 
 def _parse_published(entry):
@@ -116,7 +125,11 @@ def fetch_and_store_rss():
     from news_fetcher import llm_client
 
     fast_provider = llm_client.provider_for_tier(llm_client.TIER_FAST)
-    max_entries = RSS_MAX_ENTRIES_PER_FEED_GROQ if fast_provider == "groq" else 30
+    configured_cap = os.getenv("RSS_MAX_ENTRIES_PER_FEED", "").strip()
+    if configured_cap.isdigit():
+        max_entries = int(configured_cap)
+    else:
+        max_entries = RSS_MAX_ENTRIES_PER_FEED_GROQ if fast_provider == "groq" else 30
     feed_urls = _active_feed_urls("general")
 
     logger.info("=== RSS fetch starting ===")
@@ -141,6 +154,11 @@ def fetch_and_store_rss():
         source_name, articles = fetch_feed(feed_url, max_entries=max_entries)
         if articles:
             feed_metrics = store_articles(articles, "Global News", provider="rss")
+            try:
+                from local.feed_topics import apply_feed_topic
+                apply_feed_topic(feed_url, articles)
+            except Exception:
+                logger.exception("  [RSS] Feed topic tag failed for %s", feed_url[:80])
             metrics["feeds_with_articles"] += 1
             metrics["input_articles"] += feed_metrics.get("input_articles", 0)
             metrics["stored"] += feed_metrics.get("stored", 0)

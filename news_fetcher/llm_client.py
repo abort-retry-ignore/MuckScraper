@@ -32,6 +32,8 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "")
 # always-on CPU box that covers for a Wake-on-LAN GPU box while it sleeps or
 # wakes. Leave blank to keep the original single-host behavior unchanged.
 OLLAMA_FALLBACK_HOST = os.environ.get("OLLAMA_FALLBACK_HOST", "")
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
+OLLAMA_EMBED_HOST = os.environ.get("OLLAMA_EMBED_HOST", "").strip()
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "nomic-embed-text")
 
@@ -242,13 +244,22 @@ def generate_text(prompt, timeout=30, tier=TIER_QUALITY):
     return _generate_text_ollama(prompt, timeout, model)
 
 
+def _ollama_headers(host):
+    """Auth header for Ollama Cloud. Local daemons get no header."""
+    if OLLAMA_API_KEY and host and "ollama.com" in host:
+        return {"Authorization": f"Bearer {OLLAMA_API_KEY}"}
+    return {}
+
+
 def _probe_ollama_host(host):
     """Cheap reachability check (GET /api/tags) used by the fallback selector
     and the admin status surface. Kept short via _OLLAMA_PROBE_TIMEOUT."""
     if not host:
         return False
     try:
-        response = requests.get(f"{host}/api/tags", timeout=_OLLAMA_PROBE_TIMEOUT)
+        response = requests.get(
+            f"{host}/api/tags", headers=_ollama_headers(host), timeout=_OLLAMA_PROBE_TIMEOUT,
+        )
         return response.status_code == 200
     except Exception:
         return False
@@ -341,7 +352,27 @@ def probe_ollama_inference():
              reachability checks already handle.
     """
     reachable = False
-    for host in (OLLAMA_HOST, OLLAMA_FALLBACK_HOST):
+    if OLLAMA_API_KEY and OLLAMA_HOST and _probe_ollama_host(OLLAMA_HOST):
+        reachable = True
+        try:
+            response = requests.post(
+                f"{OLLAMA_HOST}/api/generate",
+                headers=_ollama_headers(OLLAMA_HOST),
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": "Reply with ok",
+                    "stream": False,
+                    "think": False,
+                },
+                timeout=_INFERENCE_PROBE_TIMEOUT,
+            )
+            response.raise_for_status()
+            if (response.json().get("response") or "").strip():
+                return True
+        except Exception as e:
+            logger.info(f"  [llm_client] Cloud generate probe failed on {OLLAMA_HOST}: {e}")
+    embed_hosts = (OLLAMA_EMBED_HOST,) if OLLAMA_EMBED_HOST else (OLLAMA_HOST, OLLAMA_FALLBACK_HOST)
+    for host in embed_hosts:
         if not host or not _probe_ollama_host(host):
             continue
         reachable = True
@@ -349,6 +380,7 @@ def probe_ollama_inference():
             try:
                 response = requests.post(
                     f"{host}/api/embeddings",
+                    headers=_ollama_headers(host),
                     json={"model": EMBEDDING_MODEL, "prompt": "health check"},
                     timeout=_INFERENCE_PROBE_TIMEOUT,
                 )
@@ -413,6 +445,7 @@ def _generate_text_ollama(prompt, timeout, model=None):
     def _call(host):
         response = requests.post(
             f"{host}/api/generate",
+            headers=_ollama_headers(host),
             json=body,
             timeout=timeout,
         )
@@ -462,14 +495,19 @@ def _generate_text_openai_compatible(prompt, timeout, model, provider, _attempt=
     label = config["label"]
     headers = {"Authorization": f"Bearer {config['api_key']}", **config["headers"]}
     try:
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        # Free Nemotron variants reason by default and then return the label
+        # in a thinking channel, which the classifier cannot match.
+        if provider == "openrouter":
+            payload["reasoning"] = {"enabled": False, "effort": "none"}
         response = requests.post(
             f"{config['base_url'].rstrip('/')}/chat/completions",
             headers=headers,
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=timeout,
+            json=payload,
+            timeout=max(timeout, 90) if provider == "openrouter" else timeout,
         )
         if response.status_code == 429 and _attempt < OPENAI_COMPATIBLE_MAX_RETRIES:
             # A 429 from these providers is usually a per-minute window rather
@@ -487,8 +525,9 @@ def _generate_text_openai_compatible(prompt, timeout, model, provider, _attempt=
                 prompt, timeout, model, provider, _attempt=_attempt + 1
             )
         response.raise_for_status()
-        text = response.json()["choices"][0]["message"]["content"]
-        return (text or "").strip() or None
+        message = response.json()["choices"][0]["message"]
+        text = message.get("content") or message.get("reasoning") or ""
+        return text.strip() or None
     except Exception as e:
         logger.info(f"  [llm_client] {label} generate error: {e}")
         return None
@@ -543,18 +582,26 @@ def get_embedding(text):
 
 
 def _get_embedding_ollama(text):
-    if not OLLAMA_HOST and not OLLAMA_FALLBACK_HOST:
+    embed_host = OLLAMA_EMBED_HOST or OLLAMA_HOST
+    if not embed_host and not OLLAMA_FALLBACK_HOST:
         return None
 
     def _call(host):
         response = requests.post(
             f"{host}/api/embeddings",
+            headers=_ollama_headers(host),
             json={"model": EMBEDDING_MODEL, "prompt": text},
             timeout=15,
         )
         response.raise_for_status()
         return response.json().get("embedding") or None
 
+    if OLLAMA_EMBED_HOST:
+        try:
+            return _call(OLLAMA_EMBED_HOST)
+        except Exception as e:
+            logger.info(f"  [llm_client] Ollama embedding error on {OLLAMA_EMBED_HOST}: {e}")
+            return None
     return _ollama_request("embedding", _call)
 
 

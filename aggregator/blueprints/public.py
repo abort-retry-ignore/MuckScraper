@@ -23,10 +23,12 @@ public = Blueprint("public", __name__)
 
 @public.route("/")
 def index():
-    # Land on Headlines (Regis, 2026-10-04: the more natural starting page).
+    # This install opens on New Zealand headlines. Sci/Tech is the next topic
+    # in the sidebar. The edition view stays at /headlines.
+    nz = url_for("admin.list_articles", topic="New Zealand", range="7d")
     if current_user.is_authenticated or public_read_enabled():
-        return redirect(url_for("public.headlines_feed"))
-    return redirect(url_for("auth.login", next=url_for("public.headlines_feed")))
+        return redirect(nz)
+    return redirect(url_for("auth.login", next=nz))
 
 
 @public.route("/headlines")

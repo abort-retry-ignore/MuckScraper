@@ -1,0 +1,70 @@
+# Dockge / production stack. Images are published by .github/workflows/docker-publish.yml.
+# Copy .env.sample to .env and fill it in. Do not bind-mount the source over /app.
+name: muckscraper
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg14
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.8
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-muckscraper-dev-key}
+    volumes:
+      - ./meili_data:/meili_data
+    restart: unless-stopped
+
+  feed-proxy:
+    image: ghcr.io/abort-retry-ignore/muckscraper-feed-proxy:latest
+    restart: unless-stopped
+
+  docker-restart-proxy:
+    image: ghcr.io/abort-retry-ignore/muckscraper-restart-proxy:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      COMPOSE_PROJECT_NAME: muckscraper
+    restart: unless-stopped
+
+  scheduler:
+    image: ghcr.io/abort-retry-ignore/muckscraper:latest
+    entrypoint: ["sh", "-c", "sleep 15 && python -m news_fetcher.scheduler"]
+    depends_on:
+      - postgres
+      - meilisearch
+      - feed-proxy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    environment:
+      FLASK_APP: aggregator.app
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      POSTGRES_HOST: postgres
+      MEILI_URL: ${MEILI_URL:-http://meilisearch:7700}
+    restart: unless-stopped
+
+  app:
+    image: ghcr.io/abort-retry-ignore/muckscraper:latest
+    ports:
+      - "5050:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - meilisearch
+      - docker-restart-proxy
+    env_file: .env
+    environment:
+      FLASK_APP: aggregator.app
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      POSTGRES_HOST: postgres
+      MEILI_URL: ${MEILI_URL:-http://meilisearch:7700}
+      DOCKER_RESTART_PROXY_URL: http://docker-restart-proxy:5001
+    restart: unless-stopped

@@ -46,6 +46,7 @@ RUN playwright install chromium
 # Copy the app code
 COPY aggregator ./aggregator
 COPY news_fetcher ./news_fetcher
+COPY local ./local
 COPY boot.sh ./boot.sh
 
 # Expose the port the app runs on

@@ -33,7 +33,7 @@ logging.basicConfig(
 
 # When the scheduler fetches/publishes is DB-backed (PipelineSchedule,
 # admin-editable at /admin/pipeline-schedule) rather than env-var hour lists.
-TIMEZONE = "America/New_York"
+TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "America/New_York")
 
 
 def get_scheduled_fetches():
