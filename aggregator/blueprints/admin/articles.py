@@ -44,7 +44,7 @@ def fetch_page():
 # scrape-status filter and no scrape details (see articles.html).
 @admin.route("/articles")
 @public_or_login
-def list_articles(per_page=25, force_multi=False):
+def list_articles(per_page=None, force_multi=False):
     active_label = request.args.get("topic", None)
     active_scrape_status = request.args.get("scrape_status", "").strip().lower() or None
     active_search_query = request.args.get("q", "").strip() or None
@@ -52,6 +52,9 @@ def list_articles(per_page=25, force_multi=False):
     # On by default: "All Stories" includes single-article stories; "false" hides them.
     show_single = request.args.get("show_single", "true") != "false"
     story_id = request.args.get("story_id", type=int)
+    from aggregator.reader_prefs import list_page_size
+    if per_page is None:
+        per_page = list_page_size("grouped" if force_multi else "all")
     active_range = request.args.get("range", DEFAULT_TIME_RANGE)
     if active_range not in TIME_RANGES:
         active_range = DEFAULT_TIME_RANGE
@@ -171,7 +174,7 @@ def list_articles(per_page=25, force_multi=False):
 @admin.route("/multi-stories")
 @public_or_login
 def multi_article_stories():
-    return list_articles(per_page=50, force_multi=True)
+    return list_articles(force_multi=True)
 
 
 @admin.route("/fetch", methods=["POST"])

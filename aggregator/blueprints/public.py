@@ -23,8 +23,8 @@ public = Blueprint("public", __name__)
 
 @public.route("/")
 def index():
-    # This install opens on science and technology. The edition view stays at /headlines.
-    landing = url_for("admin.list_articles", topic="Sci/Tech", range="7d")
+    from aggregator.reader_prefs import landing_url
+    landing = landing_url()
     if current_user.is_authenticated or public_read_enabled():
         return redirect(landing)
     return redirect(url_for("auth.login", next=landing))
@@ -39,7 +39,8 @@ def headlines_feed():
     this — this route just reads what they wrote). Falls back to a live
     top-stories query if no edition has been published yet (fresh install).
     """
-    per_page = 10
+    from aggregator.reader_prefs import list_page_size
+    per_page = list_page_size("headlines")
     page = max(1, request.args.get("page", 1, type=int) or 1)
 
     latest_edition = Edition.query.filter_by(published=True).order_by(Edition.created_at.desc()).first()

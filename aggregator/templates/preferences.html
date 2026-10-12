@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html data-theme="light">
+<head>
+    <title>Preferences — MuckScraper</title>
+{% include '_account_page_head.html' %}
+</head>
+<body>
+{% include '_account_topbar.html' %}
+
+<div class="container">
+    <h1>Preferences</h1>
+    <p class="subtitle">These apply to the whole reader, including signed-out visitors. They are stored in the database, so an image update does not reset them.</p>
+
+    {% include '_flashes.html' %}
+
+    <div class="card">
+        <h2>Landing page</h2>
+        <p class="hint">Where the reader opens.</p>
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="field">
+                <label for="landing">Open on</label>
+                <select id="landing" name="landing">
+                    {% for value, label in landing_choices %}
+                    <option value="{{ value }}" {{ 'selected' if prefs.landing == value }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label for="topic">Topic</label>
+                <select id="topic" name="topic">
+                    <option value="">Choose a topic</option>
+                    {% for topic in topics %}
+                    <option value="{{ topic.name }}" {{ 'selected' if prefs.topic == topic.name }}>{{ topic.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label for="time_range">Time window</label>
+                <select id="time_range" name="time_range">
+                    {% for value, label in ranges %}
+                    <option value="{{ value }}" {{ 'selected' if prefs.time_range == value }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <p class="hint">Used for All Stories, Grouped Stories and a topic. Headlines uses the latest edition.</p>
+            </div>
+
+            <h2>List display</h2>
+            <p class="hint">Compact uses smaller images and tighter cards, so more stories fit on the list.</p>
+            <div class="field">
+                <label class="check">
+                    <input type="checkbox" name="compact" {{ 'checked' if prefs.compact }}>
+                    Compact list
+                </label>
+            </div>
+            <button type="submit" class="btn btn-primary">Save preferences</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>

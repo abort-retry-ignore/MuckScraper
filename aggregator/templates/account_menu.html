@@ -17,6 +17,7 @@
             </div>
             <a role="menuitem" href="{{ url_for('auth.profile', back=menu_back()) }}">{{ icon('user') }} Profile</a>
             {%- if can('admin') %}
+            <a role="menuitem" href="{{ url_for('admin.preferences_page', back=menu_back()) }}">{{ icon('sliders') }} Preferences</a>
             <a role="menuitem" href="{{ url_for('admin.users_page', back=menu_back()) }}">{{ icon('users') }} Users</a>
             <a role="menuitem" href="{{ url_for('admin.tools_page', back=menu_back()) }}">{{ icon('wrench') }} Admin Tools</a>
             {%- endif %}

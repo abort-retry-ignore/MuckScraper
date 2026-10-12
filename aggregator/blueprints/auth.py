@@ -14,7 +14,8 @@ auth = Blueprint("auth", __name__)
 @auth.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("public.headlines_feed"))
+        from aggregator.reader_prefs import landing_url
+        return redirect(landing_url())
 
     if request.method == "POST":
         username = request.form.get("username")
@@ -30,7 +31,8 @@ def login():
             db.session.commit()
             next_page = request.args.get("next")
             if not next_page or urlparse(next_page).netloc != "":
-                next_page = url_for("public.headlines_feed")
+                from aggregator.reader_prefs import landing_url
+                next_page = landing_url()
             return redirect(next_page)
         else:
             flash("Invalid username or password")

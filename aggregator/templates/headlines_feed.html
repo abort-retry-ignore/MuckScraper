@@ -61,7 +61,7 @@
         {% include 'sidebar_styles.html' %}
     </style>
 </head>
-<body>
+<body class="{{ 'density-compact' if reader_prefs and reader_prefs.compact else '' }}">
 <div class="layout">
 {% include 'sidebar_nav.html' %}
 <div class="page-body">

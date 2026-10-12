@@ -109,3 +109,44 @@
     .story-layout { flex-direction: column; }
     .story-image { width: 100%; height: 200px; min-width: unset; }
 }
+
+/* Compact list: small thumbnail beside the headline, including on a phone. */
+body.density-compact .story {
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+body.density-compact .story:hover { transform: none; box-shadow: var(--shadow); }
+body.density-compact .story-image {
+    width: 88px;
+    min-width: 88px;
+    min-height: 64px;
+    height: 64px;
+}
+body.density-compact .story-image-placeholder { font-size: 22px; }
+body.density-compact .story-content { padding: 8px 12px; }
+body.density-compact .story h2 {
+    font-size: 15px;
+    line-height: 1.25;
+    margin-bottom: 2px;
+}
+body.density-compact .card-meta { margin-bottom: 4px; font-size: 12px; }
+body.density-compact .bias-balance { margin-bottom: 6px; border-radius: 8px; }
+body.density-compact .bias-col { padding: 3px 4px; }
+body.density-compact .bias-col-count { font-size: 14px; }
+body.density-compact .summary {
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+body.density-compact .card-actions { gap: 6px; }
+body.density-compact .card-actions > * { flex-basis: 140px; }
+body.density-compact .card-actions .btn { padding: 6px 8px; }
+@media (max-width: 900px) {
+    body.density-compact .story-layout { flex-direction: row; }
+    body.density-compact .story-image {
+        width: 72px;
+        min-width: 72px;
+        height: 72px;
+    }
+}
