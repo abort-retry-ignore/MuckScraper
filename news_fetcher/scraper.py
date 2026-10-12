@@ -310,6 +310,18 @@ def _backoff_seconds_for_result(result, failure_count, scope):
 def _should_cache_retry_result(result):
     if result.status in (SCRAPE_STATUS_SUCCESS, SCRAPE_STATUS_FALLBACK, SCRAPE_STATUS_SKIPPED):
         return False
+    # Connection-level errors (DNS NXDOMAIN on a variant host, transient
+    # network) are not stable outlet behaviour: parking the domain in cooldown
+    # made real rescrapes impossible. The m.stuff.co.nz variant host does not
+    # resolve, and nine Stuff articles sat in retry_deferred hell for it.
+    reason = (result.failure_reason or "").lower()
+    if any(marker in reason for marker in (
+        "name or service not known",
+        "connectionerror",
+        "failed to establish a new connection",
+        "max retries exceeded",
+    )):
+        return False
     return True
 
 
@@ -581,6 +593,32 @@ def use_googlebot(url):
 
 
 def _fetch_html(url, headers=None, timeout=10):
+    """Fetch with a browser-grade TLS fingerprint when possible.
+
+    Several outlets (NZ Herald, Newsroom, science.org) 401/403 plain Python
+    clients on TLS fingerprint alone. curl_cffi impersonating Chrome passes
+    those, so it is the preferred engine with a requests fallback. A custom
+    UA means the caller wants that UA verbatim (the Googlebot path) -- send
+    it through plain requests instead, since a Chrome fingerprint plus a
+    Googlebot UA is a self-contradictory client.
+    """
+    if not headers or headers.get("User-Agent") == HEADERS_DEFAULT["User-Agent"]:
+        try:
+            from curl_cffi import requests as curl_requests
+
+            response = curl_requests.get(
+                url,
+                timeout=timeout,
+                impersonate="chrome",
+                headers={k: v for k, v in (headers or {}).items() if k.lower() != "user-agent"} or None,
+            )
+            response.raise_for_status()
+            return response
+        except ImportError:
+            logger.info("  [Scraper] curl_cffi not installed, using requests")
+        except Exception as e:
+            logger.info(f"  [Scraper] curl_cffi error, falling back to requests: {e}")
+
     if headers is None:
         headers = HEADERS_DEFAULT
     response = requests.get(url, headers=headers, timeout=timeout)

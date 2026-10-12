@@ -7,6 +7,7 @@ newsapi-python
 beautifulsoup4
 requests==2.31.0
 urllib3<2.0.0
+curl_cffi>=0.7
 charset-normalizer>=2,<4
 chardet<6
 apscheduler
