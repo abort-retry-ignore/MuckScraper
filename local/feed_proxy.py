@@ -77,6 +77,17 @@ def _parse_date(value: str) -> datetime | None:
     return parsed
 
 
+def _image_loc(node: ET.Element) -> str:
+    """The sitemap <image:image><image:loc> under a <url>, if any."""
+    for child in node.iter():
+        if _local(child.tag) != "image":
+            continue
+        for grandchild in child.iter():
+            if _local(grandchild.tag) == "loc" and grandchild.text:
+                return grandchild.text.strip()
+    return ""
+
+
 def _items_from_sitemap(xml: bytes, keep) -> list[dict]:
     root = ET.fromstring(xml)
     items = []
@@ -88,7 +99,12 @@ def _items_from_sitemap(xml: bytes, keep) -> list[dict]:
             continue
         title = _text(node, "title") or urlparse(loc).path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ")
         published = _parse_date(_text(node, "publication_date") or _text(node, "lastmod"))
-        items.append({"title": title, "url": loc, "published": published})
+        items.append({
+            "title": title,
+            "url": loc,
+            "published": published,
+            "image": _image_loc(node) or None,
+        })
     return items
 
 
@@ -157,6 +173,10 @@ def _rss(channel_title: str, channel_link: str, items: list[dict], cap: int = 40
         body.append(f"<title>{html.escape(item['title'])}</title>")
         body.append(f"<link>{html.escape(item['url'])}</link>")
         body.append(f"<guid>{html.escape(item['url'])}</guid>")
+        if item.get("image"):
+            body.append(
+                f'<enclosure url="{html.escape(item["image"])}" type="image/jpeg"/>'
+            )
         if item["published"]:
             body.append(f"<pubDate>{format_datetime(item['published'])}</pubDate>")
         body.append("</item>")
@@ -186,6 +206,7 @@ def cnn_rss() -> bytes:
 
 _LIFESPAN_ITEM = re.compile("<item>(.*?)</item>", re.S)
 _TAG = re.compile("<(?:title|link|pubDate)>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</(?:title|link|pubDate)>")
+_ENCLOSURE_RE = re.compile('<enclosure[^>]+url="([^"]+)"')
 
 
 def _lifespan_items() -> list[dict]:
@@ -203,8 +224,14 @@ def _lifespan_items() -> list[dict]:
                 continue
             title, link = fields[0].strip(), fields[1].strip()
             published = _parse_date(fields[2]) if len(fields) > 2 else None
+            enclosure = _ENCLOSURE_RE.search(block)
             if title and link.startswith("http"):
-                items.append({"title": title, "url": link, "published": published})
+                items.append({
+                    "title": title,
+                    "url": link,
+                    "published": published,
+                    "image": enclosure.group(1) if enclosure else None,
+                })
     return items
 
 
