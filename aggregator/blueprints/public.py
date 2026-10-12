@@ -23,12 +23,11 @@ public = Blueprint("public", __name__)
 
 @public.route("/")
 def index():
-    # This install opens on New Zealand headlines. Sci/Tech is the next topic
-    # in the sidebar. The edition view stays at /headlines.
-    nz = url_for("admin.list_articles", topic="New Zealand", range="7d")
+    # This install opens on science and technology. The edition view stays at /headlines.
+    landing = url_for("admin.list_articles", topic="Sci/Tech", range="7d")
     if current_user.is_authenticated or public_read_enabled():
-        return redirect(nz)
-    return redirect(url_for("auth.login", next=nz))
+        return redirect(landing)
+    return redirect(url_for("auth.login", next=landing))
 
 
 @public.route("/headlines")
