@@ -30,6 +30,16 @@ def tools_page():
     require_text = bool(_load_json_setting(REQUIRE_TEXT_SETTING_KEY))
     respect_robots = bool(_load_json_setting(RESPECT_ROBOTS_SETTING_KEY))
 
+    paywall_outlets = [
+        {
+            "id": outlet_id,
+            "label": option["label"],
+            "domain": option["domain"],
+            "enabled": bool(_load_json_setting(option["key"])),
+        }
+        for outlet_id, option in PAYWALL_OUTLET_OPTIONS.items()
+    ]
+
     running_ops = _running_operations()
     fetch_ops = [op for op in running_ops if op["kind"] == "fetch"]
     other_ops = [op for op in running_ops if op["kind"] == "other"]
@@ -40,6 +50,7 @@ def tools_page():
         auto_summaries_enabled=auto_summaries,
         require_article_text_enabled=require_text,
         respect_robots_enabled=respect_robots,
+        paywall_outlets=paywall_outlets,
         containers=_list_containers(),
         container_service_order=CONTAINER_SERVICE_NAMES,
         pipeline_schedule_restart_needed=pipeline_schedule_restart_needed(),
@@ -94,6 +105,86 @@ def toggle_respect_robots():
     enabled = request.form.get("enabled") == "true"
     _save_json_setting(RESPECT_ROBOTS_SETTING_KEY, enabled)
     logger.info(f"[Settings] respect_robots_txt set to {enabled}")
+    return redirect(url_for("admin.tools_page"))
+
+
+# Paywalled flagship outlets: an on/off switch each. On = the outlet's RSS
+# feeds ingest, its domain is exempted from the permanent scrape blocklist,
+# and scrape attempts get a bot-UA retry. Off = feeds disabled and the domain
+# stays blocked, exactly like before the options existed.
+PAYWALL_OUTLET_OPTIONS = {
+    "nyt": {
+        "key": "nyt_articles_enabled",
+        "domain": "nytimes.com",
+        "feeds": [
+            "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+            "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+            "https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/section/world/rss.xml",
+        ],
+        "label": "NY Times articles",
+    },
+    "wsj": {
+        "key": "wsj_articles_enabled",
+        "domain": "wsj.com",
+        "feeds": [
+            "https://feeds.content.dowjones.io/public/rss/RSSWSJD",
+            "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+        ],
+        "label": "WSJ articles",
+    },
+    "bloomberg": {
+        "key": "bloomberg_articles_enabled",
+        "domain": "bloomberg.com",
+        "feeds": [
+            "https://feeds.bloomberg.com/technology/news.rss",
+            "https://feeds.bloomberg.com/markets/news.rss",
+        ],
+        "label": "Bloomberg articles",
+    },
+    "wapo": {
+        "key": "wapo_articles_enabled",
+        "domain": "washingtonpost.com",
+        "feeds": [],
+        "label": "Washington Post articles",
+    },
+}
+
+
+@admin.route("/toggle-paywall-outlet/<outlet_id>", methods=["POST"])
+@role_required(ROLE_ADMIN)
+def toggle_paywall_outlet(outlet_id):
+    from datetime import datetime as _dt
+
+    from aggregator import db
+    from aggregator.models import RssFeed
+    from news_fetcher.scraper import PAYWALL_OUTLET_DOMAINS
+
+    option = PAYWALL_OUTLET_OPTIONS.get(outlet_id)
+    if not option:
+        flash("Unknown outlet.", "error")
+        return redirect(url_for("admin.tools_page"))
+
+    enabled = request.form.get("enabled") == "true"
+    _save_json_setting(option["key"], enabled)
+
+    now = _dt.utcnow()
+    for url in option["feeds"]:
+        row = RssFeed.query.filter_by(url=url, bucket="general").first()
+        if row is None:
+            db.session.add(RssFeed(url=url, bucket="general", label=f"{option['label']} RSS", enabled=enabled, added_at=now))
+        else:
+            row.enabled = enabled
+    db.session.commit()
+
+    # Toggling on: the domain leaves the permanent blocklist at scrape time,
+    # so retry the outlet's blocked/failed articles in the background.
+    if enabled:
+        from news_fetcher.scraper import get_blocked_outlet_rescrape
+        rescrape = get_blocked_outlet_rescrape(option["domain"])
+        if rescrape:
+            _start_bulk_task(f"rescrape_blocked_{option['domain'].replace('.', '_')}", rescrape)
+
+    logger.info(f"[Settings] {option['key']} set to {enabled}")
     return redirect(url_for("admin.tools_page"))
 
 

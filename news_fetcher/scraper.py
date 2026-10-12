@@ -15,6 +15,86 @@ from datetime import datetime, timedelta
 from urllib.parse import urljoin, urlparse, urlunparse, parse_qsl, urlencode
 logger = logging.getLogger(__name__)
 
+# The four flagship paywalled outlets the operator can switch on. Each key is
+# an AppSetting switch (Admin Tools); the domain is exempted from the permanent
+# scrape blocklist while it is on, and 401/403 fetches get a bot-UA retry.
+PAYWALL_OUTLET_DOMAINS = {
+    "nytimes.com": "nyt_articles_enabled",
+    "wsj.com": "wsj_articles_enabled",
+    "bloomberg.com": "bloomberg_articles_enabled",
+    "washingtonpost.com": "wapo_articles_enabled",
+}
+
+BING_UA = "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)"
+APPLE_UA = "Mozilla/5.0 (compatible; Applebot/0.1; +http://www.apple.com/go/applebot)"
+
+# Search bots whose UA some outlets honour. NYT/Bloomberg now verify these
+# clients properly and still 403, so this is a best-effort retry, not a magic
+# key. NZ Herald (a BPC recipe: bingbot) and premium pages work with these.
+
+
+def _outlet_toggle_on(domain):
+    """Read the AppSetting switch for a paywalled outlet."""
+    import json
+
+    key = PAYWALL_OUTLET_DOMAINS.get(domain)
+    if not key:
+        return False
+    from aggregator.models import AppSetting
+
+    setting = AppSetting.query.filter_by(key=key).first()
+    if not setting:
+        return False
+    try:
+        return bool(json.loads(setting.value))
+    except (ValueError, TypeError):
+        return False
+
+
+def paywall_outlet_enabled(domain):
+    return _outlet_toggle_on(domain)
+
+
+def get_blocked_outlet_rescrape(domain):
+    """Background-task closure: rescrape blocked/failed articles for the outlet
+    an Admin Tools switch just turned on. Runs inside an app context."""
+    def run():
+        from aggregator import db
+        from aggregator.models import Article, RawArticlePayload  # noqa: F401
+
+        targets = (
+            Article.query
+            .filter(Article.scrape_status.in_((SCRAPE_STATUS_BLOCKED, SCRAPE_STATUS_FAILED, "pending")))
+            .filter(Article.url.contains(domain))
+            .order_by(Article.date.desc())
+            .limit(200)
+            .all()
+        )
+        logger.info(f"[Rescrape] {len(targets)} {domain} article(s) after toggle-on")
+        fixed = 0
+        for i, article in enumerate(targets):
+            try:
+                result = scrape_article(article.url, force=True)
+            except Exception as e:
+                logger.warning(f"  [Rescrape] error on {article.url[:60]}: {e}")
+                continue
+            article.scrape_status = result.status
+            article.scrape_method = result.method
+            article.scrape_failure_reason = result.failure_reason
+            article.scrape_http_status = result.http_status
+            if result.content:
+                article.content = result.content
+                fixed += 1
+            if result.image_url and not article.image_url:
+                article.image_url = result.image_url
+            if (i + 1) % 20 == 0:
+                db.session.commit()
+        db.session.commit()
+        logger.info(f"[Rescrape] {domain}: fixed {fixed}/{len(targets)}")
+
+    return run
+
+
 RESPECT_ROBOTS_SETTING_KEY = "respect_robots_txt"
 
 # robots.txt parsers per scheme://host, cached for the process lifetime.
@@ -440,10 +520,12 @@ def is_domain_blocked(url):
     """
     Return True if this URL's domain is actually blocked.
 
-    Permanent entries always block. Auto-blocked (non-permanent) entries only
-    block once they've accumulated BLOCKLIST_MIN_HIT_THRESHOLD hits, and stop
-    blocking once expires_at has passed -- see add_to_blocklist() and the
-    ScrapeBlocklist model docstring for how those get set.
+    Permanent entries always block -- except the flagship paywalled outlets,
+    which the operator can switch on individually in Admin Tools. Auto-blocked
+    (non-permanent) entries only block once they've accumulated
+    BLOCKLIST_MIN_HIT_THRESHOLD hits, and stop blocking once expires_at has
+    passed -- see add_to_blocklist() and the ScrapeBlocklist model docstring
+    for how those get set.
     """
     try:
         from aggregator.models import ScrapeBlocklist
@@ -454,6 +536,8 @@ def is_domain_blocked(url):
         if not entry:
             return False
         if entry.is_permanent:
+            if domain in PAYWALL_OUTLET_DOMAINS:
+                return not paywall_outlet_enabled(domain)
             return True
         if (entry.hit_count or 0) < BLOCKLIST_MIN_HIT_THRESHOLD:
             return False
@@ -1074,6 +1158,20 @@ def scrape_article(url, fallback_content=None, force=False):
     result = try_bs4(url, method="bs4")
     if result and result.succeeded:
         return result
+
+    # The search-bot-UA retry: outlets like NZ Herald (BPC's own recipe for
+    # them) serve full text to bot UAs while flagging every browser-like
+    # client. Only attempted when the outlet was switched on in Admin Tools.
+    domain_for_ua = get_domain(url)
+    if (
+        domain_for_ua in PAYWALL_OUTLET_DOMAINS
+        and paywall_outlet_enabled(domain_for_ua)
+        and http_status in (401, 403)
+    ):
+        for bot_name, bot_ua in (("bingbot", BING_UA), ("applebot", APPLE_UA), ("googlebot", HEADERS_GOOGLEBOT["User-Agent"])):
+            bot_result = try_bs4(url, headers={"User-Agent": bot_ua}, method=f"botua_{bot_name}")
+            if bot_result and bot_result.succeeded:
+                return bot_result
 
     if needs_playwright(url):
         logger.info(f"  [Scraper] Using Playwright for {url[:60]}")

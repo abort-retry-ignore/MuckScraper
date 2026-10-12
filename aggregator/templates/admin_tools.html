@@ -459,6 +459,20 @@
                     <button type="submit" class="btn">{{ 'Disable' if respect_robots_enabled else 'Enable' }}</button>
                 </form>
             </div>
+            {% for outlet in paywall_outlets %}
+            <div class="tool-card">
+                <div class="tool-card-title">{{ outlet.label }}</div>
+                <p>When on, {{ outlet.domain }} feeds ingest and the domain is exempted from the permanent scrape blocklist, with a bot-UA retry on 401/403. These outlets keep their walls: articles carry the headline, feed summary and image &mdash; full body text generally needs a paid unlocker. Off by default.</p>
+                <div class="meta-row">
+                    <span class="badge">{{ 'Enabled' if outlet.enabled else 'Disabled' }}</span>
+                </div>
+                <form method="POST" action="{{ url_for('admin.toggle_paywall_outlet', outlet_id=outlet.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="enabled" value="{{ 'false' if outlet.enabled else 'true' }}">
+                    <button type="submit" class="btn">{{ 'Disable' if outlet.enabled else 'Enable' }}</button>
+                </form>
+            </div>
+            {% endfor %}
         </div>
     </div>
 
