@@ -63,6 +63,14 @@ def _parse_date(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
+        parsed = None
+    if parsed is None:
+        try:
+            from email.utils import parsedate_to_datetime
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            parsed = None
+    if parsed is None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
@@ -125,7 +133,7 @@ def _cnn_items() -> list[dict]:
     return _items_from_sitemap(xml, keep)
 
 
-def _rss(channel_title: str, channel_link: str, items: list[dict]) -> bytes:
+def _rss(channel_title: str, channel_link: str, items: list[dict], cap: int = 40) -> bytes:
     deduped = []
     seen = set()
     for item in sorted(items, key=lambda row: row["published"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
@@ -133,7 +141,7 @@ def _rss(channel_title: str, channel_link: str, items: list[dict]) -> bytes:
             continue
         seen.add(item["url"])
         deduped.append(item)
-        if len(deduped) >= 40:
+        if len(deduped) >= cap:
             break
 
     body = [
@@ -176,6 +184,36 @@ def cnn_rss() -> bytes:
     return _cached("cnn", lambda: _rss("CNN", "https://www.cnn.com/science", _cnn_items()))
 
 
+_LIFESPAN_ITEM = re.compile("<item>(.*?)</item>", re.S)
+_TAG = re.compile("<(?:title|link|pubDate)>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</(?:title|link|pubDate)>")
+
+
+def _lifespan_items() -> list[dict]:
+    """WordPress caps its RSS at 10 posts; pages 2-5 hold the older ones."""
+    items = []
+    for page in range(1, 6):
+        url = f"https://www.lifespan.io/feed/?paged={page}"
+        try:
+            xml = _fetch(url).decode("utf-8", "replace")
+        except Exception:
+            continue
+        for block in _LIFESPAN_ITEM.findall(xml):
+            fields = _TAG.findall(block)
+            if len(fields) < 2:
+                continue
+            title, link = fields[0].strip(), fields[1].strip()
+            published = _parse_date(fields[2]) if len(fields) > 2 else None
+            if title and link.startswith("http"):
+                items.append({"title": title, "url": link, "published": published})
+    return items
+
+
+def lifespan_rss() -> bytes:
+    # Same channel title as lifespan.io's own feed, so the scheduler keeps
+    # filing these under the existing outlet instead of creating a second one.
+    return _cached("lifespan", lambda: _rss("Lifespan Research Institute", "https://www.lifespan.io/news/", _lifespan_items(), cap=60))
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         path = urlparse(self.path).path
@@ -186,6 +224,8 @@ class Handler(BaseHTTPRequestHandler):
                 body, content_type = reuters_rss(), "application/rss+xml; charset=utf-8"
             elif path == "/cnn.xml":
                 body, content_type = cnn_rss(), "application/rss+xml; charset=utf-8"
+            elif path == "/lifespan.xml":
+                body, content_type = lifespan_rss(), "application/rss+xml; charset=utf-8"
             else:
                 self.send_error(404)
                 return

@@ -45,6 +45,7 @@ services:
     env_file: .env
     environment:
       FLASK_APP: aggregator.app
+      RSS_ENTRY_OVERRIDES: ${RSS_ENTRY_OVERRIDES:-}
       DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       POSTGRES_HOST: postgres
       MEILI_URL: ${MEILI_URL:-http://meilisearch:7700}

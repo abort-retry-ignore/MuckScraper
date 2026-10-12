@@ -130,6 +130,15 @@ def fetch_and_store_rss():
         max_entries = int(configured_cap)
     else:
         max_entries = RSS_MAX_ENTRIES_PER_FEED_GROQ if fast_provider == "groq" else 30
+    # Per-feed caps for merged feeds that carry more than one default page:
+    # RSS_ENTRY_OVERRIDES="URL1=50|URL2=30" (first match on a substring).
+    overrides = []
+    raw_overrides = os.getenv("RSS_ENTRY_OVERRIDES", "")
+    for chunk in raw_overrides.split("|") if raw_overrides else []:
+        if "=" in chunk:
+            pattern, _, value = chunk.rpartition("=")
+            if pattern.strip() and value.strip().isdigit():
+                overrides.append((pattern.strip().lower(), int(value)))
     feed_urls = _active_feed_urls("general")
 
     logger.info("=== RSS fetch starting ===")
@@ -151,7 +160,12 @@ def fetch_and_store_rss():
     }
 
     for feed_url in feed_urls:
-        source_name, articles = fetch_feed(feed_url, max_entries=max_entries)
+        cap = max_entries
+        for pattern, value in overrides:
+            if pattern in feed_url.lower():
+                cap = value
+                break
+        source_name, articles = fetch_feed(feed_url, max_entries=cap)
         if articles:
             feed_metrics = store_articles(articles, "Global News", provider="rss")
             try:
