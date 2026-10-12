@@ -26,6 +26,9 @@ FEED_TOPICS = {
     # Science and technology
     "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml": "Sci/Tech",
     "https://feeds.bbci.co.uk/news/technology/rss.xml": "Sci/Tech",
+    "https://www.science.org/rss/news_current.xml": "Sci/Tech",
+    "https://www.lifespan.io/feed/": "Longevity",
+    "https://theconversation.com/nz/health/articles.atom": "Health",
     "http://feed-proxy:8080/reuters.xml": "Sci/Tech",
     "http://feed-proxy:8080/cnn.xml": "Sci/Tech",
 }
@@ -47,9 +50,16 @@ FEED_LABELS = {
     "https://www.waateanews.com/rss": "Waatea News",
     "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml": "BBC Science",
     "https://feeds.bbci.co.uk/news/technology/rss.xml": "BBC Technology",
+    "https://www.science.org/rss/news_current.xml": "Science (AAAS) News",
+    "https://www.lifespan.io/feed/": "Lifespan.io",
+    "https://theconversation.com/nz/articles.atom": "The Conversation NZ",
+    "https://theconversation.com/nz/health/articles.atom": "The Conversation NZ Health",
     "http://feed-proxy:8080/reuters.xml": "Reuters Science and Technology",
     "http://feed-proxy:8080/cnn.xml": "CNN Science and Technology",
 }
+
+
+TOPIC_SORT = {"New Zealand": 0, "Sci/Tech": 1, "Health": 2, "Longevity": 3}
 
 
 def topic_for_feed(url: str) -> str | None:
@@ -68,7 +78,7 @@ def apply_feed_topic(feed_url: str, articles: list[dict]) -> None:
 
     topic = Topic.query.filter_by(name=topic_name).first()
     if topic is None:
-        topic = Topic(name=topic_name, is_active=True, sort_order=0 if topic_name == "New Zealand" else 1)
+        topic = Topic(name=topic_name, is_active=True, sort_order=TOPIC_SORT.get(topic_name, 10))
         db.session.add(topic)
         db.session.flush()
 

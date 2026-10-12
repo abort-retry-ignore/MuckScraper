@@ -10,6 +10,7 @@ article URLs, which MuckScraper can ingest without going through Google News
 from __future__ import annotations
 
 import html
+import os
 import re
 import threading
 import time
@@ -23,6 +24,8 @@ from xml.etree import ElementTree as ET
 UA = "Mozilla/5.0 (compatible; MuckScraperFeedProxy/1.0; +https://github.com/grregis/MuckScraper)"
 CACHE_SECONDS = 600
 PORT = 8080
+REUTERS_WINDOW = int(os.environ.get("REUTERS_WINDOW", "1200"))
+REUTERS_PAGE = 100
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, bytes]] = {}
@@ -83,12 +86,18 @@ def _items_from_sitemap(xml: bytes, keep) -> list[dict]:
 
 def _reuters_items() -> list[dict]:
     items = []
-    for start in range(0, 800, 100):
+    failures = 0
+    for start in range(0, REUTERS_WINDOW, REUTERS_PAGE):
         url = f"https://www.reuters.com/arc/outboundfeeds/sitemap/?outputType=xml&from={start}"
         try:
             xml = _fetch(url)
         except Exception:
-            break
+            # A single blocked page should not lose the rest of the window.
+            failures += 1
+            if failures >= 3:
+                break
+            continue
+        failures = 0
 
         def keep(loc: str, _node: ET.Element) -> bool:
             path = urlparse(loc).path.lower()
@@ -96,7 +105,7 @@ def _reuters_items() -> list[dict]:
 
         page = _items_from_sitemap(xml, keep)
         items.extend(page)
-        if b"<url>" not in xml and b"<loc>" not in xml:
+        if b"<loc>" not in xml:
             break
     return items
 
