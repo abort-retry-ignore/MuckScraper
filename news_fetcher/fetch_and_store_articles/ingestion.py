@@ -77,6 +77,7 @@ def empty_store_metrics(topic_name, provider=None, input_articles=0):
             "promotional": 0,
             "duplicate_url": 0,
             "duplicate_title_outlet": 0,
+            "no_text": 0,
         },
         "scrape_statuses": {},
         "bias_buckets": {bucket: 0 for bucket in BIAS_BUCKETS},
@@ -86,6 +87,37 @@ def empty_store_metrics(topic_name, provider=None, input_articles=0):
             "unrated": 0,
         },
     }
+
+
+REQUIRE_TEXT_SETTING_KEY = "require_article_text"
+
+
+def _require_article_text():
+    """The Admin Tools toggle: refuse to store articles with no text at all.
+
+    Off by default so nobody silently loses feeds where scraping is broken and
+    RSS descriptions are thin. Same AppSetting pattern as the deep-analysis
+    toggle -- read directly here so the fetcher imports no admin blueprint.
+    """
+    import json
+
+    from aggregator.models import AppSetting
+
+    setting = AppSetting.query.filter_by(key=REQUIRE_TEXT_SETTING_KEY).first()
+    if not setting:
+        return False
+    try:
+        return bool(json.loads(setting.value))
+    except (ValueError, TypeError):
+        return False
+
+
+def _visible_text(html_string):
+    """Rough visible text length, for the 'no scrapable text' check."""
+    if not html_string:
+        return ""
+    import re
+    return re.sub(r"<[^>]+>", " ", html_string).split()
 
 
 def merge_count_maps(target, source):
@@ -377,6 +409,13 @@ def store_articles(articles_data, topic_name, provider=None):
         else:
             from news_fetcher.scraper import sanitize_html
             final_content = sanitize_html(f"<div>{content}</div>") if content else ""
+
+        if _require_article_text() and not _visible_text(final_content):
+            # Nothing was scraped and the feed had no description either: these
+            # land as dead cards in the reader and never summarise.
+            logger.info(f"  [Ingest] Skipping no-text article (toggle on): {title[:70]}")
+            metrics["skipped"]["no_text"] += 1
+            continue
 
         # Ensure embedding is a list, not a string
         if isinstance(article_embedding, str):

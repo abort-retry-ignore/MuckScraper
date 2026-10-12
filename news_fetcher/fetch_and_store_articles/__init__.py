@@ -76,6 +76,7 @@ from .edition_content import (  # noqa: F401
     _fill_story_content,
     process_current_edition,
 )
+from .ingestion import REQUIRE_TEXT_SETTING_KEY  # noqa: F401  (re-exported for the admin toggle)
 from .maintenance import (  # noqa: F401
     generate_missing_embeddings,
     audit_existing_scrapes,
