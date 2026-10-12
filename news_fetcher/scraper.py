@@ -15,6 +15,57 @@ from datetime import datetime, timedelta
 from urllib.parse import urljoin, urlparse, urlunparse, parse_qsl, urlencode
 logger = logging.getLogger(__name__)
 
+RESPECT_ROBOTS_SETTING_KEY = "respect_robots_txt"
+
+# robots.txt parsers per scheme://host, cached for the process lifetime.
+# The toggle is off by default: until it is flipped, nothing here changes the
+# scraper's behaviour. When on, each new host's robots.txt is fetched once.
+_robots_parsers = {}
+
+
+def robots_respected():
+    """The Admin Tools toggle: check robots.txt before scraping."""
+    import json
+
+    from aggregator.models import AppSetting
+
+    setting = AppSetting.query.filter_by(key=RESPECT_ROBOTS_SETTING_KEY).first()
+    if not setting:
+        return False
+    try:
+        return bool(json.loads(setting.value))
+    except (ValueError, TypeError):
+        return False
+
+
+def robots_allow_fetch(url, user_agent):
+    """True when robots.txt (if the toggle is on) permits this fetch."""
+    if not robots_respected():
+        return True
+    import urllib.robotparser
+
+    parsed = urlparse(url)
+    host = f"{parsed.scheme}://{parsed.netloc}"
+    parser = _robots_parsers.get(host, "missing")
+    if parser == "missing":
+        parser = urllib.robotparser.RobotFileParser()
+        parser.url = f"{host}/robots.txt"
+        try:
+            response = requests.get(f"{host}/robots.txt", timeout=5,
+                                    headers={"User-Agent": user_agent})
+            parser.parse(response.text.splitlines() if response.status_code == 200 else [])
+        except Exception:
+            # Unreachable robots.txt behaves like 'no rules' -- never punish a
+            # site for a network hiccup on our side.
+            parser = None
+        _robots_parsers[host] = parser
+    if parser is None:
+        return True
+    try:
+        return parser.can_fetch(user_agent, url)
+    except Exception:
+        return True
+
 HEADERS_DEFAULT = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -826,6 +877,15 @@ def scrape_article(url, fallback_content=None, force=False):
             status=SCRAPE_STATUS_BLOCKED,
             method="blocklist",
             failure_reason="domain_blocked",
+        )
+
+    if not robots_allow_fetch(url, HEADERS_DEFAULT["User-Agent"]):
+        logger.info(f"  [Scraper] robots.txt disallows this fetch: {url[:60]}")
+        return ScrapeResult(
+            content=None,
+            status=SCRAPE_STATUS_BLOCKED,
+            method="robots",
+            failure_reason="robots_disallowed",
         )
 
     if should_skip(url):

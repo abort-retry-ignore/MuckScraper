@@ -17,14 +17,18 @@ logger = logging.getLogger(__name__)
 @admin.route("/tools")
 @role_required(ROLE_ADMIN)
 def tools_page():
+    from aggregator.models import AppSetting
     from news_fetcher.fetch_and_store_articles import (
         AUTO_ARTICLE_DEEP_ANALYSIS_SETTING_KEY,
         AUTO_SUMMARIES_SETTING_KEY,
         REQUIRE_TEXT_SETTING_KEY,
     )
+    from news_fetcher.scraper import RESPECT_ROBOTS_SETTING_KEY
+
     auto_deep = bool(_load_json_setting(AUTO_ARTICLE_DEEP_ANALYSIS_SETTING_KEY))
     auto_summaries = bool(_load_json_setting(AUTO_SUMMARIES_SETTING_KEY))
     require_text = bool(_load_json_setting(REQUIRE_TEXT_SETTING_KEY))
+    respect_robots = bool(_load_json_setting(RESPECT_ROBOTS_SETTING_KEY))
 
     running_ops = _running_operations()
     fetch_ops = [op for op in running_ops if op["kind"] == "fetch"]
@@ -35,6 +39,7 @@ def tools_page():
         auto_article_deep_analysis_enabled=auto_deep,
         auto_summaries_enabled=auto_summaries,
         require_article_text_enabled=require_text,
+        respect_robots_enabled=respect_robots,
         containers=_list_containers(),
         container_service_order=CONTAINER_SERVICE_NAMES,
         pipeline_schedule_restart_needed=pipeline_schedule_restart_needed(),
@@ -79,6 +84,16 @@ def toggle_require_article_text():
     enabled = request.form.get("enabled") == "true"
     _save_json_setting(REQUIRE_TEXT_SETTING_KEY, enabled)
     logger.info(f"[Settings] require_article_text set to {enabled}")
+    return redirect(url_for("admin.tools_page"))
+
+
+@admin.route("/toggle-respect-robots", methods=["POST"])
+@role_required(ROLE_ADMIN)
+def toggle_respect_robots():
+    from news_fetcher.scraper import RESPECT_ROBOTS_SETTING_KEY
+    enabled = request.form.get("enabled") == "true"
+    _save_json_setting(RESPECT_ROBOTS_SETTING_KEY, enabled)
+    logger.info(f"[Settings] respect_robots_txt set to {enabled}")
     return redirect(url_for("admin.tools_page"))
 
 
