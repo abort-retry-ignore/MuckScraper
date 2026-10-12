@@ -410,6 +410,10 @@ def store_articles(articles_data, topic_name, provider=None):
             from news_fetcher.scraper import sanitize_html
             final_content = sanitize_html(f"<div>{content}</div>") if content else ""
 
+        # Feeds like RNZ ship no image tags; the scrape may still find og:image.
+        if not image_url and scrape_result.image_url:
+            image_url = scrape_result.image_url
+
         if _require_article_text() and not _visible_text(final_content):
             # Nothing was scraped and the feed had no description either: these
             # land as dead cards in the reader and never summarise.

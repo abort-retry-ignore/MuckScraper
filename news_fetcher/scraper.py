@@ -168,6 +168,7 @@ class ScrapeResult:
     method: str | None = None
     failure_reason: str | None = None
     http_status: int | None = None
+    image_url: str | None = None
 
     @property
     def succeeded(self):
@@ -649,6 +650,43 @@ def extract_with_readability(html, url):
     return None
 
 
+# og:image / twitter:image / image_src extraction for feeds that ship no
+# image tags (RNZ, interest.co.nz, Newsroom, The Conversation, ...).
+_OG_IMAGE_RE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::secure_url)?|twitter:image(?:\:src)?|imageSrc)["\'][^>]*content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_OG_IMAGE_CONTENT_FIRST_RE = re.compile(
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\'](?:og:image(?::secure_url)?|twitter:image(?:\:src)?|imageSrc)["\']',
+    re.IGNORECASE,
+)
+_LINK_IMAGE_RE = re.compile(
+    r'<link[^>]+rel=["\']image_src["\'][^>]*href=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+
+def extract_page_image(html, base_url):
+    """Best-effort hero image from meta tags. None when the page has none."""
+    if not html:
+        return None
+    match = (
+        _OG_IMAGE_RE.search(html)
+        or _OG_IMAGE_CONTENT_FIRST_RE.search(html)
+        or _LINK_IMAGE_RE.search(html)
+    )
+    if not match:
+        return None
+    import html as html_lib
+
+    candidate = html_lib.unescape((match.group(1) or "").strip())
+    if not candidate or candidate.lower().startswith("data:"):
+        return None
+    if not candidate.startswith(("http://", "https://")):
+        candidate = urljoin(base_url, candidate)
+    return candidate if candidate.startswith(("http://", "https://")) else None
+
+
 def extract_structured_metadata(html, url):
     """
     Extract article-ish text from JSON-LD, OpenGraph, Twitter cards, and
@@ -963,6 +1001,12 @@ def scrape_article(url, fallback_content=None, force=False):
     # Seen live 2026-09-13: a single Fox article about CAPTCHA malware
     # recorded hits 1-4 within 334 ms and blocked foxnews.com for 48h.
     blocklist_hit_recorded = False
+    page_image = None
+
+    def remember_page_image(html_text):
+        nonlocal page_image
+        if page_image is None and html_text:
+            page_image = extract_page_image(html_text, url)
 
     def finalize_content(content, method, status=SCRAPE_STATUS_SUCCESS, http_status_override=None):
         nonlocal blocklist_hit_recorded
@@ -987,6 +1031,7 @@ def scrape_article(url, fallback_content=None, force=False):
             status=status,
             method=method,
             http_status=http_status_override if http_status_override is not None else http_status,
+            image_url=page_image,
         )
         update_retry_cache(url, result)
         return result
@@ -999,6 +1044,7 @@ def scrape_article(url, fallback_content=None, force=False):
             http_status = response.status_code
             if candidate_url == url and headers == HEADERS_DEFAULT:
                 initial_html = response.text
+            remember_page_image(response.text)
             content = extract_with_readability(response.text, candidate_url)
             if content:
                 return finalize_content(content, method)
@@ -1050,6 +1096,7 @@ def scrape_article(url, fallback_content=None, force=False):
 
     if initial_html:
         attempted_methods.append("metadata")
+        remember_page_image(initial_html)
         content = extract_structured_metadata(initial_html, url)
         if content:
             return finalize_content(content, "metadata", SCRAPE_STATUS_FALLBACK)
