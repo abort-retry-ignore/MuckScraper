@@ -13,7 +13,6 @@ FEED_TOPICS = {
     "https://www.rnz.co.nz/rss/top.xml": "New Zealand",
     "https://www.rnz.co.nz/rss/political.xml": "New Zealand",
     "https://www.rnz.co.nz/rss/business.xml": "New Zealand",
-    "https://www.rnz.co.nz/rss/teao.xml": "New Zealand",
     "https://www.stuff.co.nz/rss/national": "New Zealand",
     "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/nz/?outputType=xml": "New Zealand",
     "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/kahu/?outputType=xml": "New Zealand",
@@ -29,7 +28,6 @@ FEED_TOPICS = {
     "https://www.science.org/rss/news_current.xml": "Sci/Tech",
     "http://feed-proxy:8080/lifespan.xml": "Longevity",
     "https://theconversation.com/nz/health/articles.atom": "Health",
-    "http://feed-proxy:8080/reuters.xml": "Sci/Tech",
     "http://feed-proxy:8080/cnn.xml": "Sci/Tech",
 }
 
@@ -38,7 +36,6 @@ FEED_LABELS = {
     "https://www.rnz.co.nz/rss/top.xml": "RNZ Top Stories",
     "https://www.rnz.co.nz/rss/political.xml": "RNZ Politics",
     "https://www.rnz.co.nz/rss/business.xml": "RNZ Business",
-    "https://www.rnz.co.nz/rss/teao.xml": "RNZ Te Ao Maori",
     "https://www.stuff.co.nz/rss/national": "Stuff NZ News",
     "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/nz/?outputType=xml": "NZ Herald New Zealand",
     "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/kahu/?outputType=xml": "NZ Herald Kahu",
@@ -54,7 +51,6 @@ FEED_LABELS = {
     "http://feed-proxy:8080/lifespan.xml": "Lifespan.io",
     "https://theconversation.com/nz/articles.atom": "The Conversation NZ",
     "https://theconversation.com/nz/health/articles.atom": "The Conversation NZ Health",
-    "http://feed-proxy:8080/reuters.xml": "Reuters Science and Technology",
     "http://feed-proxy:8080/cnn.xml": "CNN Science and Technology",
 }
 
